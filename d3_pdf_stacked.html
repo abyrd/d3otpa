@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Fake CDF, layered</title>
+<style>
+
+body {
+  font: 10px sans-serif;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+</style>
+<body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script>
+
+(function() {
+'use strict'
+
+var margin = {top: 20, right: 30, bottom: 30, left: 40},
+    width = 1000 - margin.left - margin.right,
+    height = 400 - margin.top - margin.bottom;
+
+var x = d3.scale.linear()
+    .domain([0, 90])
+    .range([0, width]);
+
+var y = d3.scale.linear()
+    .domain([0, 100])
+    .range([height, 0]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .orient("bottom");
+
+var yAxis = d3.svg.axis()
+    .scale(y)
+    .orient("left");
+
+// An OTPA quantiles object
+var qs = {
+    count: 1000,
+    breaks: [10, 20, 30, 33, 35, 40, 50, 59, 60, 64, 70]
+};
+
+// take a list of time breaks and returns (tmin, avg_density) per interquantile range
+// works well with line().interpolate("step-after")  
+var densityStep = function(breaks) {
+    var nq = breaks.length - 1;
+    var ds = [[0, 0]];
+    for (var i = 0; i < nq; i++) {
+        var b0 = breaks[i],
+            b1 = breaks[i+1],
+            range = b1- b0,
+            density = (1/nq) / range;
+        ds.push([b0,  density])    
+    }
+    ds.push([breaks[nq], 0]);
+    return ds;
+}
+
+// take a list of sorted time breaks and returns two points at avg_density per interquantile range
+// works well with line().interpolate("cardinal")  
+var densitySmooth = function(count, breaks) {
+    var nq = breaks.length - 1;
+    var ds = [[breaks[0] - 2, 0], [breaks[0], 0]];
+    for (var i = 0; i < nq; i++) {
+        var b0 = breaks[i],
+            b1 = breaks[i+1],
+            range = b1 - b0,
+            fringe = range * 0.2,
+            // mid = b0 + range / 2.0,
+            density = (1/nq) / range;
+            density *= count;
+        ds.push([b0 + fringe,  density])
+        ds.push([b1 - fringe,  density])
+    }
+    ds.push([breaks[nq], 0]);
+    ds.push([breaks[nq] + 2, 0]);
+    return ds;
+}
+
+// Each layer's values must be separate objects or they can't have different y0s added
+// i.e. don't shallow copy values.
+var densities0 = densitySmooth(qs.count, qs.breaks).map(function(x) {return {x:x[0], y:x[1]}});
+var densities1 = densitySmooth(qs.count, qs.breaks).map(function(x) {return {x:x[0], y:x[1]}});
+var densities2 = densitySmooth(qs.count, qs.breaks).map(function(x) {return {x:x[0], y:x[1]}});
+
+var svg = d3.select("body").append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+// g element is used to group SVG shapes together, not d3 specific
+svg.append("g") 
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + height + ")")
+    .call(xAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", width)
+    .attr("y", -6)
+    .style("text-anchor", "end")
+    .text("Travel time (min.)");
+
+svg.append("g")
+    .attr("class", "y axis")
+    .call(yAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", margin.left)
+    .attr("y", margin.top)
+    .style("text-anchor", "beginning")
+    .text("Opportunity density (per minute)");
+
+
+// A stack layout transforms the input data set, adding a y0 offset value
+// See https://github.com/mbostock/d3/wiki/Stack-Layout
+var stack = d3.layout.stack() // stack will be called on an array of layers, each of which is an array
+  .offset("zero") // other options are: silhouette, wiggle, zero
+  .values(function (d) { return d.values; }) // supply a func to extract values from each element in layers
+  .x(function (d) { return d.x; })  // func to extract x values from values
+  .y(function (d) { return d.y; }); // func to extract y values from values
+
+// densities are cloned so they each get different y0 values.
+var series = [
+    {name: "A", values: densities0},
+    {name: "B", values: densities1},
+    {name: "C", values: densities2}
+]
+
+var color = d3.scale.ordinal()
+  .domain(["A","B","C","D","E"])
+  .range(["#001c9c","#101b4d","#475003","#9c8305","#d3c47c"]);
+
+// call the stack layout on the data series (array of layers) to create y0 vertical shifts
+stack(series);
+
+var area = d3.svg.area()
+  .interpolate("monotone")
+  .x(function (d)  { return x(d.x); })
+  .y0(function (d) { return y(d.y0); })
+  .y1(function (d) { return y(d.y0 + d.y); });
+
+// Find the max absolute y value and set the y domain accordingly
+y.domain([0, d3.max(series, function(s) { 
+  return d3.max(s.values, function(v) { return v.y0 + v.y; }); })]);
+
+var selection = svg.selectAll(".series")
+  .data(series)
+  .enter().append("g")
+  .attr("class", "series");
+
+selection.append("path")
+  .attr("class", "streamPath")
+  .attr("d", function (d) { console.log(d); return area(d.values); })
+  .style("fill", function (d) { return color(d.name); })
+  .style("stroke", "black")
+  .style("stroke-width", "0.4");
+  
+
+}()); // call the anonymous function (~= namespace)
+
+</script>
+</body>
+

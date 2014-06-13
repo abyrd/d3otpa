@@ -1,0 +1,40 @@
+<html>
+
+<head>
+
+<link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.css" />
+<script src="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.js"></script>
+<style>
+#map { height: 100%; }
+</style>
+
+</head>
+
+<body>
+<div id="map"></div>
+<script>
+var map = L.map('map').setView([52.3666, 4.9], 13);
+L.tileLayer('https://c.tiles.mapbox.com/v3/conveyal.hml987j0/{z}/{x}/{y}.png', {
+    attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, <a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>',
+    maxZoom: 18
+}).addTo(map);
+L.tileLayer('http://localhost:8080/otp/surfaces/0/isotiles/{z}/{x}/{y}.png', {
+    maxZoom: 18
+}).addTo(map);
+var jsonLayer = L.geoJson();
+
+var xhr = new XMLHttpRequest();
+xhr.open("GET", "http://localhost:8080/otp/surfaces/0/isochrone", true);
+xhr.onreadystatechange = function(e) {
+  if (this.readyState == 4 && this.status == 200) {
+    // var json = JSON.parse();
+    jsonLayer.addData(JSON.parse(this.responseText));
+    jsonLayer.addTo(map);
+  }
+};
+xhr.send()
+
+</script>
+</body>
+    
+</html>

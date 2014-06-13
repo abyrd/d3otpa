@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Fake Kernel Density Estimation</title>
+<style>
+
+body {
+  font: 10px sans-serif;
+}
+
+.bar {
+  fill: #bbb;
+  shape-rendering: crispEdges;
+}
+
+.line {
+  fill: lightsteelblue;
+  stroke: #000;
+  stroke-width: 1.5px;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+.y.axis path {
+  display: none;
+}
+
+</style>
+<body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script>
+
+(function() {
+'use strict'
+
+var margin = {top: 20, right: 30, bottom: 30, left: 40},
+    width = 1000 - margin.left - margin.right,
+    height = 400 - margin.top - margin.bottom;
+
+var x = d3.scale.linear()
+    .domain([0, 90])
+    .range([0, width]);
+
+var y = d3.scale.linear()
+    .domain([0, 100])
+    .range([height, 0]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .orient("bottom");
+
+var yAxis = d3.svg.axis()
+    .scale(y)
+    .orient("left");
+
+var line = d3.svg.line()
+    //.interpolate("step-after")
+    .interpolate("monotone")
+    .x(function(d) { return x(d[0]); })
+    .y(function(d) { return y(d[1]); });
+    
+var svg = d3.select("body").append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+  .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+// An OTPA quantiles object
+var qs = {
+        count: 1000,
+        breaks: [10, 20, 30, 33, 35, 40, 50, 59, 60, 64, 70]
+    };
+
+// take a list of time breaks and returns (tmin, avg_density) per interquantile range
+// works well with line().interpolate("step-after")  
+var densityStep = function(breaks) {
+    var nq = breaks.length - 1;
+    var ds = [[0, 0]];
+    for (var i = 0; i < nq; i++) {
+        var b0 = breaks[i],
+            b1 = breaks[i+1],
+            range = b1- b0,
+            density = (1/nq) / range;
+        ds.push([b0,  density])    
+    }
+    ds.push([breaks[nq], 0]);
+    return ds;
+}
+
+// take a list of sorted time breaks and returns two points at avg_density per interquantile range
+// works well with line().interpolate("cardinal")  
+var densitySmooth = function(count, breaks) {
+    var nq = breaks.length - 1;
+    var ds = [[breaks[0] - 2, 0], [breaks[0], 0]];
+    for (var i = 0; i < nq; i++) {
+        var b0 = breaks[i],
+            b1 = breaks[i+1],
+            range = b1 - b0,
+            fringe = range * 0.2,
+            // mid = b0 + range / 2.0,
+            density = (1/nq) / range;
+            density *= count;
+        ds.push([b0 + fringe,  density])
+        ds.push([b1 - fringe,  density])
+    }
+    ds.push([breaks[nq], 0]);
+    ds.push([breaks[nq] + 2, 0]);
+    return ds;
+}
+
+qs.densities = densitySmooth(qs.count, qs.breaks);
+
+svg.append("path")
+  .datum(qs.densities)
+  .attr("class", "line")
+  .attr("d", line);
+
+// g element is used to group SVG shapes together, not d3 specific
+svg.append("g") 
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + height + ")")
+    .call(xAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", width)
+    .attr("y", -6)
+    .style("text-anchor", "end")
+    .text("Travel time (min.)");
+
+svg.append("g")
+    .attr("class", "y axis")
+    .call(yAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", margin.left)
+    .attr("y", margin.top)
+    .style("text-anchor", "beginning")
+    .text("Opportunity density (per minute)");
+
+/*
+var points = svg.selectAll(".point")
+        .data(qs.densities)
+      .enter().append("svg:circle")
+        .attr("stroke", "black")
+        .attr("fill", function(d, i) { return "black" })
+        .attr("cx", function(d, i) { return x(d[0]) })
+        .attr("cy", function(d, i) { return y(d[1]) })
+        .attr("r", function(d, i) { return 3 });
+*/
+
+}()); // call the anonymous function (~= namespace)
+
+</script>
+</body>
+

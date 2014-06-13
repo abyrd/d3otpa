@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Fake CDF, layered</title>
+<style>
+
+body {
+  font: 10px sans-serif;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+</style>
+<body>
+<h1>Kernel density estimation, stacked.</h1>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script>
+
+// Wrap the rest of the script in an anonymous function, which creates a namespace.
+// This also creates a local block to which we can apply strict JS syntax.
+(function() {
+'use strict'
+
+var margin = {top: 20, right: 30, bottom: 30, left: 40},
+    width = 1000 - margin.left - margin.right,
+    height = 400 - margin.top - margin.bottom;
+
+var x = d3.scale.linear()
+    .domain([0, 90])
+    .range([0, width]);
+
+var y = d3.scale.linear()
+    .domain([0, 100])
+    .range([height, 0]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .orient("bottom");
+
+var yAxis = d3.svg.axis()
+    .scale(y)
+    .orient("left");
+
+// Some OTPA-ish quantiles objects, giving min/max times and deciles.
+var quantiles = [
+    {
+      id: 'mfg',
+      desc: 'Manufaturing jobs',
+      count: 1000,
+      breaks: [10, 20, 30, 33, 35, 40, 50, 59, 64, 68, 70]
+    },
+    {
+      id: 'health',
+      desc: 'Health care jobs',
+      count: 2000,
+      breaks: [10, 15, 20, 22, 30, 33, 40, 45, 60, 69, 80]
+    },
+    {
+      id: 'finance',
+      desc: 'Finance jobs',
+      count: 400,
+      breaks: [20, 24, 30, 38, 42, 44, 46, 50, 52, 58, 90]
+    }
+]
+
+var color = d3.scale.ordinal()
+  .domain(['mfg', 'health', 'finance'])
+  .range(["#001c9c", "#101b4d", "#475003", "#9c8305", "#d3c47c"]);
+
+// Take a list of sorted time breaks and returns N regularly spaced points in each 
+// interquantile range. Intended for input to kernel smoothing.
+var sampleDensity = function(breaks, N) {
+    var nq = breaks.length - 1;
+    var ds = [];
+    for (var q = 0; q < nq; q++) {
+        var b0 = breaks[q],
+            b1 = breaks[q + 1],
+            range = b1 - b0,
+            step = range / (1.0 + N);
+        for (var i = 0; i < N; i++) {
+            ds.push(b0 + step * i);
+        }
+    }
+    return ds;
+}
+
+// Takes a kernel density function and a list of sample points xs.  
+// Returns a function that computes a PDF estimate at each x value in the array xs.
+// The result of that function is an array of [x, density] items.
+// The kernel should be a PDF around 0 producing densities in [0..1].
+function kernelDensityEstimator(kernel) {
+  // the sample is a representative bunch of _unweighted_ individuals along the x axis 
+  return function(sample, xs) {
+    return xs.map(function(x) {
+      return [x, d3.mean(sample, function(s) { return kernel(x - s); })];
+    });
+  };
+}
+
+// A normal PDF centered on 0 with variance v
+function gaussianKernel(v) {
+  return function(x) {
+    return Math.exp(-(x*x)/(2.0*v*v)) / (v * Math.sqrt(2*Math.PI));
+  };
+}
+
+function triangleKernel(p) {
+  return function(u) {
+    var d = Math.abs(u) / p;        
+    return (d > 1) ? 0 : ((1 - d)/p) * 0.5;
+  };
+}
+
+// KDE bandwidth (variance) should represent the spread/uncertainty of an opportunity in time.
+// The kernel density estimator will return values at each of N regularly spaced points
+// created by scale.ticks()
+var kde = kernelDensityEstimator(triangleKernel(2));
+var x_ticks = x.ticks(100);
+
+// Add density samples to each quantiles object
+quantiles.forEach(function(q) { 
+    var ds = sampleDensity(q.breaks, 10);
+    q.densities = kde(ds, x_ticks); // returns an array of [x ϵ x_ticks, density]
+    q.densities.forEach(function(d) { d[1] *= q.count; }); // scale densities by count
+});
+
+// Create an SVG element
+var svg = d3.select("body").append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+// A stack layout transforms the input data set, adding a y0 offset value
+// See https://github.com/mbostock/d3/wiki/Stack-Layout
+var stack = d3.layout.stack() 
+  .offset("silhouette") // other options are: silhouette, wiggle, zero, expand
+  .values(function(d){ return d.densities; }) // func to extract values from each layer
+  .x(function (d) { return d[0]; })            // func to extract x values from densities
+  .y(function (d) { return d[1]; });           // func to extract y values from densities
+
+// call the stack layout on the data series (array of layers) to create y0 vertical shifts
+stack(quantiles);
+
+// d3 objects are often also callable functions
+// the area will later be called with stacked data, and will extract x and y values
+var area = d3.svg.area()
+  .interpolate("cardinal")               // additional smoothing on top of the KDE
+  .x(function (d)  { return x(d[0]); })  // the x scale function projects x --> SVG coords
+  .y0(function (d) { return y(d.y0); })  // the bottom of the area is the offset calculated by stack
+  .y1(function (d) { return y(d.y0 + d[1]); }); // project the top of the curve to SVG y coords
+
+var selection = svg.selectAll(".series")
+  .data(quantiles)
+  .enter().append("g")
+  .attr("class", "series");
+
+selection.append("path")
+  .attr("class", "streamPath")
+  .attr("d", function (d) { return area(d.densities); })
+  .style("fill", function (d) { return color(d.id); })
+  .style("stroke", "black")
+  .style("stroke-width", "0.4");
+
+// Add a rectangle that hides part of the graph, but is under the axes.
+var rectangle = svg
+    .append("rect")
+    .attr("x", x(50))
+    .attr("y", 0)
+    .attr("width", x(40))
+    .attr("height", height)
+    .style("fill", "white")
+    .style("fill-opacity", 0.8);
+
+var vline = svg
+    .append("rect")
+    .attr("x", x(50))
+    .attr("y", 0)
+    .attr("width", 1)
+    .attr("height", height)
+    .style("fill", "none")
+    .style("stroke", "black")
+    .style("stroke-opacity", 0.5);
+
+svg.on("click", function(d, i) {
+    var coord = d3.mouse(this);
+    rectangle.attr("x", coord[0]);
+    rectangle.attr("width", width - coord[0]);
+    vline.attr("x", coord[0]);
+});
+
+// Find the max absolute y value and set the y domain accordingly
+y.domain([0, d3.max(quantiles, function(q) { 
+  return d3.max(q.densities, function(d) { return d.y0 + d.y; }); })]);
+
+// g element is used to group SVG shapes together, not d3 specific
+// In this case, they contain the x and y axis elements
+svg.append("g") 
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + height + ")")
+    .call(xAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", width)
+    .attr("y", -6)
+    .style("text-anchor", "end")
+    .text("Travel time (min.)");
+
+// Append the y axis SVG elements (must do after rescaling the y axis to match the data).
+svg.append("g")
+    .attr("class", "y axis")
+    .call(yAxis)
+  .append("text")
+    .attr("class", "label")
+    .attr("x", margin.left)
+    .attr("y", margin.top)
+    .style("text-anchor", "beginning")
+    .text("Opportunity density (per minute)");
+
+}()); // call the anonymous function (~= namespace)
+
+</script>
+</body>
+
